@@ -54,7 +54,7 @@ function [maps, figHandle] = generateEGMap3DBUG()
                 y2 = 9;    x2 = 76;
                 % Emergency Signs
                 xx1 = 86; yy1 = 29; direction1 = "back";
-                xx2 = 59; yy2 = 31; direction2 = "right";
+%                 xx2 = 59; yy2 = 31; direction2 = "right";
                 xx3 = 59; yy3 = 110; direction3 = "right";  
                 xx4 = 82; yy4 = 130; direction4 = "front";  
                 xx5 = 90; yy5 = 135; direction5 = "right";  % xx5 = 90; yy5 = 135;

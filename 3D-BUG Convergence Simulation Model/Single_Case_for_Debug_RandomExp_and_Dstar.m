@@ -1,4 +1,5 @@
 clear all; close all; clc;
+
 %% Libraries
 % Specifications Peter's Coke BUG2 Implementation:
 % https://www.petercorke.com/RTB/r9/html/Bug2.html
@@ -35,7 +36,7 @@ if isempty(figureHandle)
 end
 
 %% Initial Parameters:
-scenario = 30;
+scenario = 6;
 switch scenario
     % Case BUG2 same floor Target
     case 1
@@ -47,8 +48,8 @@ switch scenario
     case 2
         startHeight = 0;                 
         startPoint  = [15, 144, startHeight];  
-        goalHeight = 100; % Target Reached
-        goalPoint  = [48, 250, goalHeight];   
+        goalHeight = 0; % Target Reached
+        goalPoint  = [80, 25, goalHeight];   
     case 3
         startHeight = 0;                 
         startPoint  = [15, 144, startHeight];  
@@ -66,7 +67,7 @@ switch scenario
         goalPoint  = [85, 165, goalHeight];   
     case 6
         startHeight = 0; 
-        startPoint  = [80, 74, startHeight];  
+        startPoint  = [45, 28, startHeight];  %80, 74
         goalHeight = 200;               
         goalPoint  = [85, 165, goalHeight];
     case 7
@@ -104,6 +105,26 @@ switch scenario
         startPoint  = [97, 164, startHeight];  
         goalHeight = 100;               
         goalPoint  = [88, 164, goalHeight];
+    case 14
+        startHeight = 100; 
+        startPoint  = [53, 260, startHeight];  
+        goalHeight = 0;               
+        goalPoint  = [90, 55, goalHeight];
+    case 15
+        startHeight = 0; 
+        startPoint  = [80, 350, startHeight];  
+        goalHeight = 0;               
+        goalPoint  = [90, 55, goalHeight];
+    case 16
+        startHeight = 100; 
+        startPoint  = [53, 246, startHeight];  
+        goalHeight = 0;               
+        goalPoint  = [31, 153, goalHeight];
+    case 17
+        startHeight = 100; 
+        startPoint  = [57, 255, startHeight];  
+        goalHeight = 200;               
+        goalPoint  = [84, 37, goalHeight];
     case 28 % Iter 241
         startHeight = 200; 
         startPoint  = [85, 351, startHeight];  
@@ -121,8 +142,11 @@ switch scenario
         goalPoint  = [85, 162, goalHeight];
 end
 
-visionRadius = 30;
-visionAngle = 170;
+visionRadius = 30; % 30
+visionAngle = 170; %170
+
+%% Exploration algorithm selection:
+ifRandom = 1;
 
 %% Compute & Display the 3D m-line
 load('MAE_Occupancy_Map/EG-2Floor_indoor_polygon_MC_Simulation.mat');
@@ -217,10 +241,10 @@ else
 
     % 2. Plot the 3D m-line from start to goal
     zLine = linspace(startHeight, goalHeight, 100);
-    plot3(x_proj, y_proj, zLine, '-', 'Color', '#696969', 'Linewidth', 2, 'DisplayName', '3D m-line');
+    plot3(x_proj, y_proj, zLine, '-', 'Color', '#696969', 'linewidth', 2, 'DisplayName', '3D m-line');
 
     % 3. Plot the vertical line from (goal_x, goal_y, start_z) to (goal_x, goal_y, goal_z)
-    plot3([goalPoint(1), goalPoint(1)], [goalPoint(2), goalPoint(2)], [startHeight, goalHeight], '-.', 'Color', '#696969', 'Linewidth', 2, 'DisplayName', 'Vertical Line');
+    plot3([goalPoint(1), goalPoint(1)], [goalPoint(2), goalPoint(2)], [startHeight, goalHeight], '-.', 'Color', '#696969', 'LineWidth', 2, 'DisplayName', 'Vertical Line');
 end
 
 % Plot Initial Position on the 3D plot:
@@ -228,151 +252,153 @@ plot3(startPoint (1), startPoint (2), startHeight, 'ko', 'MarkerSize', 6, 'Marke
 % Plot the Final Position on the 3D Plot:
 plot3(goalPoint(1), goalPoint(2), goalHeight, 'p', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'MarkerEdgeColor', 'k');
 
-
-%% 3D BUG algorithm:
+%% 3D D* Lite Algorithm Implementation:
 tStart = tic;
 total_path = [];
 trajectory_length = 0;
-% If the startHeight is the same as the goalHeight:
+
 while true
+    % CASE 1: Same Floor Navigation - Direct to Goal
     if startHeight == goalHeight
         switch startHeight
             case 0
-                bug = Bug2_ES(maps.grid.floor2);      % create navigation object
+                ds = DstarLite_ES(maps.grid.floor2, 'visionRadius', 2, 'visionAngle', 170);
             case 100
-                bug = Bug2_ES(maps.grid.floor3);      % create navigation object
+                ds = DstarLite_ES(maps.grid.floor3, 'visionRadius', 2, 'visionAngle', 170);
             case 200
-                bug = Bug2_ES(maps.grid.floor4);      % create navigation object
+                ds = DstarLite_ES(maps.grid.floor4, 'visionRadius', 2, 'visionAngle', 170);
         end
+        
         pause(1);
         fig = figure;
         set(fig, 'Position', [left, bottom, width, height]);
-        [path, goalReached] = bug.query(startPoint(1:2), goalPoint(1:2), 'animate', true); % animate the path from start to goal
-%         [path, goalReached] = bug.query(startPoint(1:2), goalPoint(1:2), 'movie', 'bug2_navigation.mp4');
+        
+        % Direct navigation to 3D goal (ignore all emergency features)
+        [path, goalReached] = ds.query(startPoint, goalPoint, 'animate', true);
+        
         total_path = vertcat(total_path, path);
-
-        % Calculate differences between consecutive points
         diff_path = diff(path);
-        
-        % Calculate Euclidean distance for each step
         step_distances = sqrt(sum(diff_path.^2, 2));
-        
-        % Sum up all distances to get total trajectory length
-        trajectory_length = trajectory_length + sum(step_distances)/4;
-        % Display the result
-        fprintf('The estimated trajectory length in 2d bug is approximately %.2f units.\n', trajectory_length);
-
+        dstar_path_length_cells = length(path);
+        dstar_path_length_meters = sum(step_distances)/4;
+        trajectory_length = trajectory_length + dstar_path_length_meters;
+        fprintf('D* Lite trajectory length (same floor): %.2f units.\n', dstar_path_length_meters);
+    
         if ~isempty(path)
-            figure(figureHandle); % Bring the existing figure to the foreground
+            figure(figureHandle);
             hold on;
             switch startHeight
                 case 0
-                    plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'g-', 'LineWidth', 2);
+                    plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'b-', 'LineWidth', 2);
                 case 100
-                    plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'g-', 'LineWidth', 2);
+                    plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'b-', 'LineWidth', 2);
                 case 200
-                    plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'g-', 'LineWidth', 2);
-                otherwise
-                    hold off; % Release the hold
+                    plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'b-', 'LineWidth', 2);
             end
         end
         
-        if goalReached == false
-            disp("Robot is trapped, we coudn't find a reachable path to the target.")
-            tEnd = toc(tStart);
-            disp("Time Elapsed to implement the 3D Bug algorithm: " + num2str(tEnd))
-            break;
-        else
+        if goalReached
             disp("Target found!")
             tEnd = toc(tStart);
+            disp("Time Elapsed to implement the 3D D*-Lite algorithm: " + num2str(tEnd))
+            break;
+        else
+            disp("Robot is trapped, couldn't find path to target.")
+            tEnd = toc(tStart);
             disp("Time Elapsed to implement the 3D Bug algorithm: " + num2str(tEnd))
             break;
-        end % else
-    end
-    % If the startHeight is different form the goalHeight:
-    if startHeight ~= goalHeight
-        % BUG3 Algorithm here!
-        switch startHeight
-            case 0
-                bug = emergencyExitExploration_ES(maps.grid.floor2);      % create navigation object
-                bug.setSignCellsDirection([maps.emergencySigns.floor2.direction(:)]);
-                bug.setSignCellsLocation([maps.emergencySigns.floor2.location(1,:)', maps.emergencySigns.floor2.location(2,:)',]); 
-                bug.setExitCells([maps.emergencyStairs.floor2(1,:)', maps.emergencyStairs.floor2(2,:)']); % Stop cells - Emergency stair: Indoor & Outdoor [x',y']
-            case 100
-                bug = emergencyExitExploration_ES(maps.grid.floor3);      % create navigation object
-                bug.setSignCellsDirection([maps.emergencySigns.floor3.direction(:)]);
-                bug.setSignCellsLocation([maps.emergencySigns.floor3.location(1,:)', maps.emergencySigns.floor3.location(2,:)',]); 
-                bug.setExitCells([maps.emergencyStairs.floor3(1,:)', maps.emergencyStairs.floor3(2,:)']); % Stop cells - Emergency stair: Indoor & Outdoor [x',y']
-            case 200
-                bug = emergencyExitExploration_ES(maps.grid.floor4);      % create navigation object
-                bug.setSignCellsDirection([maps.emergencySigns.floor4.direction(:)]);
-                bug.setSignCellsLocation([maps.emergencySigns.floor4.location(1,:)', maps.emergencySigns.floor4.location(2,:)',]); 
-                bug.setExitCells([maps.emergencyStairs.floor4(1,:)', maps.emergencyStairs.floor4(2,:)']); % Stop cells - Emergency stair: Indoor & Outdoor [x',y']
         end
-        
-        fig = figure;
-        set(fig, 'Position', [left, bottom, width, height]);
-%         [path, goalReached, exitStairsNumber] = bug.query(startPoint, goalPoint, 'animate', true);  % Run the pathfinding with vision cone
-        [path, goalReached, exitStairsNumber] = bug.query(startPoint, goalPoint, 'animate', true, 'visionRadius', visionRadius, 'visionAngle', visionAngle);  % Run the pathfinding with vision cone
-%         [path, goalReached, exitStairsNumber] = bug.query(startPoint, goalPoint, 'movie', 'bugEmergencyExitExploration.mp4');
+    
+    % CASE 2: Different Floor Navigation - Multi-floor with emergency stairs
+    else 
+        if ifRandom
+            disp("Random trajectory exploration for emergency stairs");
 
-        total_path = vertcat(total_path, path);
-                % Calculate differences between consecutive points
-        diff_path = diff(path);
-        
-        % Calculate Euclidean distance for each step
-        step_distances = sqrt(sum(diff_path.^2, 2));
-        
-        % Sum up all distances to get total trajectory length
-        trajectory_length = trajectory_length + sum(step_distances)/4;
-        % Display the result
-        fprintf('The estimated trajectory length in 3d bug is approximately %.2f units.\n', trajectory_length);
-
-        % Plot the path trajectory in green at Fig 1
-        if ~isempty(path)
-            figure(figureHandle); % Bring the existing figure to the foreground
-            hold on;
             switch startHeight
                 case 0
-                    plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'g-', 'LineWidth', 2);
+                    randomExplorer = randomPathEmergencyStairsExploration(maps.grid.floor2, ...
+                        'visionRadius', visionRadius, 'visionAngle', visionAngle, ...
+                        'stepSize', 1);
+                    randomExplorer.setExitCells([maps.emergencyStairs.floor2(1,:)', maps.emergencyStairs.floor2(2,:)']);
                 case 100
-                    plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'g-', 'LineWidth', 2);
+                    randomExplorer = randomPathEmergencyStairsExploration(maps.grid.floor3, ...
+                        'visionRadius', visionRadius, 'visionAngle', visionAngle, ...
+                        'stepSize', 1);
+                    randomExplorer.setExitCells([maps.emergencyStairs.floor3(1,:)', maps.emergencyStairs.floor3(2,:)']);
                 case 200
-                    plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'g-', 'LineWidth', 2);
-                otherwise
-                    hold off; % Release the hold
+                    randomExplorer = randomPathEmergencyStairsExploration(maps.grid.floor4, ...
+                        'visionRadius', visionRadius, 'visionAngle', visionAngle, ...
+                        'stepSize', 1);
+                    randomExplorer.setExitCells([maps.emergencyStairs.floor4(1,:)', maps.emergencyStairs.floor4(2,:)']);
             end
-        end
-
-        % Important, organize exitStairsNumber such as the emergency exits
-        % that go across all floors (in the generateEGMap3DBUG function)
-        if exitStairsNumber == 1 || exitStairsNumber == 2 || exitStairsNumber == 3
-            startHeight = goalHeight;
-        end
-
-        switch startHeight
-            case 0
-                if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor2, 2)
-                    startPoint = [maps.emergencyStairs.floor2(:, exitStairsNumber)', startHeight];
-                else
-                    error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+            
+            % Create figure for visualization
+            fig = figure;
+            set(fig, 'Position', [left, bottom, width, height]);
+            
+            % Run random trajectory exploration
+            [path, goalReached, exitStairsNumber] = randomExplorer.query(startPoint, goalPoint, ...
+                'animate', true, 'maxTime', 300, 'maxSteps', 5000);
+            
+            total_path = vertcat(total_path, path);
+            
+            if ~isempty(path)
+                % Calculate trajectory length
+                diff_path = diff(path);
+                step_distances = sqrt(sum(diff_path.^2, 2));
+                random_path_length_cells = length(path);
+                random_path_length_meters = sum(step_distances)/4;
+                trajectory_length = trajectory_length + random_path_length_meters;
+                fprintf('Random trajectory length: %.2f units.\n', random_path_length_meters);
+                
+                % Plot path on 3D figure
+                figure(figureHandle);
+                hold on;
+                switch startHeight
+                    case 0
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'b-', 'LineWidth', 2);
+                    case 100
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'b-', 'LineWidth', 2);
+                    case 200
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'b-', 'LineWidth', 2);
+                    otherwise
+                        hold off; % Release the hold
                 end
-            case 100
-                if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor3, 2)
-                    startPoint = [maps.emergencyStairs.floor3(:, exitStairsNumber)', startHeight];
-                else
-                    error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
-                end
-            case 200
-                if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor4, 2)
-                    startPoint = [maps.emergencyStairs.floor4(:, exitStairsNumber)', startHeight];
-                else
-                    error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
-                end
+            end
+            
+            % Important, organize exitStairsNumber such as the emergency exits
+            % that go across all floors (in the generateEGMap3DBUG function)
+            if exitStairsNumber == 1 || exitStairsNumber == 2 || exitStairsNumber == 3
+                startHeight = goalHeight;
+            end
+    
+            switch startHeight
+                case 0
+                    if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor2, 2)
+                        startPoint = [maps.emergencyStairs.floor2(:, exitStairsNumber)', startHeight];
+                    else
+                        error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+                    end
+                case 100
+                    if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor3, 2)
+                        startPoint = [maps.emergencyStairs.floor3(:, exitStairsNumber)', startHeight];
+                    else
+                        error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+                    end
+                case 200
+                    if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor4, 2)
+                        startPoint = [maps.emergencyStairs.floor4(:, exitStairsNumber)', startHeight];
+                    else
+                        error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+                    end
+            end
         end
     end
 end
 
+% Calculate total trajectory metrics
+total_path_length_cells = random_path_length_cells + dstar_path_length_cells;
+total_path_length_meters = random_path_length_meters + dstar_path_length_meters;
 
 % Hold the current figure to allow overlaying additional plots
 figureHandle = findobj('Type', 'Figure', 'Name', '3D Trajectory MAE UCI');
@@ -403,5 +429,69 @@ yticks_pixels = yticks_meters / 0.25;  % Convert meters to pixels
 yticks(yticks_pixels);
 yticklabels(arrayfun(@(x) sprintf('%.1f', x), yticks_meters, 'UniformOutput', false));
 
-disp(['Length path: ' num2str(length(total_path)/4)])
-disp(['Length path 2: ' num2str(trajectory_length)])
+%% COMPREHENSIVE TRAJECTORY SUMMARY
+fprintf('\n');
+fprintf('=====================================\n');
+fprintf('      TRAJECTORY SUMMARY REPORT      \n');
+fprintf('=====================================\n');
+fprintf('\n');
+
+% Random Path Summary
+if random_path_length_cells > 0
+    fprintf('🔍 RANDOM EXPLORATION PHASE:\n');
+    fprintf('   • Path length (cells):  %d cells\n', random_path_length_cells);
+    fprintf('   • Path length (meters): %.2f m\n', random_path_length_meters);
+    fprintf('   • Average step size:    %.3f m/cell\n', random_path_length_meters/random_path_length_cells);
+    fprintf('\n');
+else
+    fprintf('🔍 RANDOM EXPLORATION PHASE: Not executed\n\n');
+end
+
+% D* Lite Path Summary
+if dstar_path_length_cells > 0
+    fprintf('🎯 D* LITE NAVIGATION PHASE:\n');
+    fprintf('   • Path length (cells):  %d cells\n', dstar_path_length_cells);
+    fprintf('   • Path length (meters): %.2f m\n', dstar_path_length_meters);
+    fprintf('   • Average step size:    %.3f m/cell\n', dstar_path_length_meters/dstar_path_length_cells);
+    fprintf('\n');
+else
+    fprintf('🎯 D* LITE NAVIGATION PHASE: Not executed\n\n');
+end
+
+% Total Summary
+fprintf('📊 TOTAL TRAJECTORY:\n');
+fprintf('   • Total cells traveled:  %d cells\n', total_path_length_cells);
+fprintf('   • Total distance:        %.2f m\n', total_path_length_meters);
+fprintf('\n');
+
+% Performance Breakdown
+if random_path_length_cells > 0 && dstar_path_length_cells > 0
+    random_percentage = (random_path_length_meters / total_path_length_meters) * 100;
+    dstar_percentage = (dstar_path_length_meters / total_path_length_meters) * 100;
+    
+    fprintf('📈 PERFORMANCE BREAKDOWN:\n');
+    fprintf('   • Random exploration:    %.1f%% of total distance\n', random_percentage);
+    fprintf('   • D* Lite navigation:    %.1f%% of total distance\n', dstar_percentage);
+    fprintf('\n');
+end
+
+% Scenario Information
+fprintf('🏢 SCENARIO DETAILS:\n');
+fprintf('   • Start floor:           %d\n', startHeight);
+fprintf('   • Goal floor:            %d\n', goalHeight);
+fprintf('   • Vision radius:         %d m\n', visionRadius);
+fprintf('   • Vision angle:          %d°\n', visionAngle);
+fprintf('\n');
+
+% Time Performance
+fprintf('⏱️  EXECUTION TIME:\n');
+fprintf('   • Total execution time:  %.2f seconds\n', toc(tStart));
+fprintf('\n');
+
+fprintf('=====================================\n');
+fprintf('           END OF REPORT             \n');
+fprintf('=====================================\n');
+
+% Legacy output for compatibility
+disp(['Length path (cells): ' num2str(total_path_length_cells)])
+disp(['Length path (meters): ' num2str(total_path_length_meters)])

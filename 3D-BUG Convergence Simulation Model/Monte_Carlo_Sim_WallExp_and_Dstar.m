@@ -1,52 +1,18 @@
-clear all; close all; clc; warning off;
 %% File Header
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %   Description:
 %   This script implements a Monte Carlo Simulation to evaluate the 
-%   performance of Eudald's BUG3 algorithm in a 3D environment, specifically
-%   the Engineering Gateway building at the University of California, Irvine.
-%
-%   The simulation aims to:
-%   1. Generate random start and goal positions across multiple floors.
-%   2. Execute the BUG3 algorithm for each scenario.
-%   3. Analyze the success rate, path lengths, and execution times.
-%   4. Demonstrate the algorithm's ability to navigate in a complex 3D space
-%      without prior knowledge of the complete map.
-%
-%   Key Features:
-%   - 3D path planning across multiple floors
-%   - Handling of obstacles and emergency exits
-%   - Performance analysis through multiple iterations
-%   - Visualization of the building layout and paths
+%   performance of Eudald's random exploration + D*-lite algorithm in a
+%   3D environment, specifically the Engineering Gateway building at the
+%   University of California, Irvine.
 %
 %   Author: Eudald Sangenis Rafart
 %   Affiliation: University of California, Irvine
 %   Email: esangeni@uci.edu
-%   Date: 18 Feb. 2025
-%   Last Revision: [Current Date]
+%   Date: Nov. 2025
 %
-%   Copyright (c) 2025, Eudald Sangenis Rafart
-%   All rights reserved.
-%
-%   Algorithm used:
-%
-%   1. Eudald's BUG3
-%
-%   Notes:
-%   - The script uses a modified version of the Navigation function from
-%     Peter Corke's Robotics Toolbox.
-%       * In Navigation function from "C:\Users\Eudald\Documents\GitRepos\PeterCork_PathPlanning_Lib\rtb",
-%         I commented this line of code (544): "assert(~nav.isoccupied(nav.goal(1:2)), 'Navigation:checkquery:badarg', 'goal location inside obstacle');"
-%         Cause when checking for the feasible goal position is on the same 
-%         floor not at a different one.
-%   However in this code:
-%   - A navigation mesh is implemented to determine feasible start and goal
-%     positions across different floors.
-%   - The simulation includes timeout mechanisms and error handling for
-%     robust performance evaluation.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Start of the code
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+clear all; close all; clc; warning off;
 
 %% Libraries
 % Add necessary paths for external libraries and custom functions
@@ -79,9 +45,9 @@ pathLengths = [];
 executionTimes = [];
 
 % Create a table to store detailed results of each simulation
-resultsTable = table('Size', [numSimulations 6], ...
-                     'VariableTypes', {'double', 'string', 'string', 'logical', 'double', 'double'}, ...
-                     'VariableNames', {'Iteration', 'StartPoint', 'GoalPoint', 'GoalReached', 'ExecutionTime', 'PathLength'});
+resultsTable = table('Size', [numSimulations 8], ...
+                     'VariableTypes', {'double', 'string', 'string', 'logical', 'double', 'double', 'double', 'double'}, ...
+                     'VariableNames', {'Iteration', 'StartPoint', 'GoalPoint', 'GoalReached', 'ExecutionTime', 'PathLength', 'WallTrajectoryLength', 'DstarTrajectoryLength'});
 
 %% Load polygon data for the building floors
 % Load pre-defined polygon data for each floor and holes
@@ -173,7 +139,7 @@ end
 
 %% Run Monte Carlo Simulation
 h = waitbar(0, 'Starting Monte Carlo Simulation...', 'Name', 'Progress');
-timeoutDuration = 120; % 2 minutes timeout
+timeoutDuration = 60*7; % 7 minutes timeout
 
 % Start a parallel pool if not already running and if parallel execution is
 % enabled. Parallel pool will not display route plots!
@@ -195,8 +161,8 @@ for i = 1:numSimulations
         [startPoint, goalPoint] = generateRandomPositions(polygons);
     else
         % Read pre-generated points from an Excel file
-        filename = '250iterResults_v170_d30_2025-02-27_18-32-01.xlsx';
-        fullPath = fullfile(pwd, filename);
+        filename = '250iterResults_v170_d30_2025-10-08_17-45-54.xlsx';
+        fullPath = fullfile([pwd, '\Monte Carlo Simulation Results\BUGFIRE\'], filename);
         
         if ~exist(fullPath, 'file')
             error('File not found: %s', fullPath);
@@ -219,9 +185,9 @@ for i = 1:numSimulations
     tic;
     if useParallel
         % Use parallel execution
-        f = parfeval(@eudaldSangenis_BUG3_fcn, 3, startPoint, goalPoint, visionRadius, visionAngle);
+        f = parfeval(@fcn_WallExp_and_Dstar, 5, startPoint, goalPoint, visionRadius, visionAngle);
         try
-            [completedIdx, path, trajectory_length, goal3DReached] = fetchNext(f, timeoutDuration);
+            [completedIdx, path, trajectory_length, goal3DReached, wall_trajectory_length, dstar_trajectory_length] = fetchNext(f);
             executionTime = toc;
             
             if completedIdx > 0
@@ -240,13 +206,16 @@ for i = 1:numSimulations
                 failureCount = failureCount + 1;
                 goal3DReached = false;
                 executionTime = timeoutDuration;
-                disp('Simulation timed out after 2 minutes.');
+                disp('Simulation timed out after 7 minutes.');
             end
         catch ME
             cancel(f);
             executionTime = toc;
             failureCount = failureCount + 1;
             goal3DReached = false;
+            trajectory_length = NaN;
+            wall_trajectory_length = NaN;
+            dstar_trajectory_length = NaN;
             disp('Error occurred during simulation.');
             disp(ME.message);
             disp(ME.stack(1));
@@ -254,7 +223,7 @@ for i = 1:numSimulations
     else
         % Run without parallel execution
         try
-            [path, trajectory_length,goal3DReached] = eudaldSangenis_BUG3_fcn(startPoint, goalPoint, visionRadius, visionAngle);
+            [path, trajectory_length, goal3DReached, wall_trajectory_length, dstar_trajectory_length] = fcn_WallExp_and_Dstar(startPoint, goalPoint, visionRadius, visionAngle);
             executionTime = toc;
             
             if goal3DReached
@@ -270,6 +239,9 @@ for i = 1:numSimulations
             executionTime = toc;
             failureCount = failureCount + 1;
             goal3DReached = false;
+            trajectory_length = NaN;
+            wall_trajectory_length = NaN;
+            dstar_trajectory_length = NaN;
             disp('Error occurred during simulation.');
             disp(ME.message);
         end
@@ -285,6 +257,12 @@ for i = 1:numSimulations
     if ~exist('trajectory_length', 'var')
         trajectory_length = NaN;
     end
+    if ~exist('wall_trajectory_length', 'var')
+        wall_trajectory_length = NaN;
+    end
+    if ~exist('dstar_trajectory_length', 'var')
+        dstar_trajectory_length = NaN;
+    end
 
     % Add results to the table
     resultsTable.Iteration(i) = i;
@@ -293,6 +271,8 @@ for i = 1:numSimulations
     resultsTable.GoalReached(i) = goal3DReached;
     resultsTable.ExecutionTime(i) = executionTime;
     resultsTable.PathLength(i) = trajectory_length; % Convert pixels to meters - size(path, 1) * 0.25
+    resultsTable.WallTrajectoryLength(i) = wall_trajectory_length;
+    resultsTable.DstarTrajectoryLength(i) = dstar_trajectory_length;
 
     fprintf('Simulation %d/%d completed. Success: %d, Failure: %d, Current Success Rate: %.2f%%\n', ...
     i, numSimulations, successCount, failureCount, (successCount / i) * 100);
@@ -305,12 +285,16 @@ close(h);
 successRate = successCount / numSimulations * 100;
 averagePathLength = mean(resultsTable.PathLength);
 averageExecutionTime = mean(resultsTable.ExecutionTime);
+averageWallTrajectoryLength = mean(resultsTable.WallTrajectoryLength, 'omitnan');
+averageDstarTrajectoryLength = mean(resultsTable.DstarTrajectoryLength, 'omitnan');
 
 disp('------------------------------------------------------------------------');
 disp('Monte Carlo Simulation Results:');
 disp(['Number of simulations: ', num2str(numSimulations)]);
 disp(['Success rate: ', num2str(successRate), '%']);
 disp(['Average path length: ', num2str(averagePathLength), ' [m]']);
+disp(['Average wall exploration length: ', num2str(averageWallTrajectoryLength), ' [m]']);
+disp(['Average D* Lite path length: ', num2str(averageDstarTrajectoryLength), ' [m]']);
 disp(['Average execution time: ', num2str(averageExecutionTime), ' seconds']);
 
 % Display the results table

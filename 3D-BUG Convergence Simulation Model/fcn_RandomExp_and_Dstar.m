@@ -1,4 +1,8 @@
-function [total_path, trajectory_length, goal3DReached] = eudaldSangenis_BUG3_fcn(startPoint, goalPoint, visionRadius, visionAngle)
+function [total_path, trajectory_length, goal3DReached, random_trajectory_length, dstar_trajectory_length] = fcn_RandomExp_and_Dstar(startPoint, goalPoint, visionRadius, visionAngle)
+
+    random_trajectory_length = 0;    % Cumulative random trajectory length
+    dstar_trajectory_length = 0;   % Cumulative D* trajectory length
+
     goal3DReached = false;
     % Get the screen size
     screenSize = get(0, 'ScreenSize');
@@ -80,108 +84,118 @@ function [total_path, trajectory_length, goal3DReached] = eudaldSangenis_BUG3_fc
     plot3(startPoint (1), startPoint (2), startHeight, 'ko', 'MarkerSize', 6, 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'g');
     % Plot the Final Position on the 3D Plot:
     plot3(goalPoint(1), goalPoint(2), goalHeight, 'p', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'MarkerEdgeColor', 'k');
-    
-    
-    %% 3D BUG algorithm:
-    % If the startHeight is the same as the goalHeight:
+
+    %% 3D D* Lite Algorithm Implementation:
     trajectory_length = 0;
+
     while true
+        % CASE 1: Same Floor Navigation - Direct to Goal
         if startHeight == goalHeight
             switch startHeight
                 case 0
-                    bug = Bug2_ES(maps.grid.floor2);      % create navigation object
+                    ds = DstarLite_ES(maps.grid.floor2, 'visionRadius', 2, 'visionAngle', visionAngle);
                 case 100
-                    bug = Bug2_ES(maps.grid.floor3);      % create navigation object
+                    ds = DstarLite_ES(maps.grid.floor3, 'visionRadius', 2, 'visionAngle', visionAngle);
                 case 200
-                    bug = Bug2_ES(maps.grid.floor4);      % create navigation object
+                    ds = DstarLite_ES(maps.grid.floor4, 'visionRadius', 2, 'visionAngle', visionAngle);
             end
+            
             pause(1);
             fig = figure;
             set(fig, 'Position', [left, bottom, width, height]);
-            [path, goalReached] = bug.query(startPoint(1:2), goalPoint(1:2), 'animate', true); % animate the path from start to goal
-    %         [path, goalReached] = bug.query(startPoint(1:2), goalPoint(1:2), 'movie', 'bug2_navigation.mp4');
+            
+            % Direct navigation to 3D goal (ignore all emergency features)
+            [path, goalReached] = ds.query(startPoint, goalPoint, 'animate', true);
+            
             total_path = vertcat(total_path, path);
-
             diff_path = diff(path);
-            % Calculate Euclidean distance for each step
             step_distances = sqrt(sum(diff_path.^2, 2));
-            % Sum up all distances to get total trajectory length
-            trajectory_length = trajectory_length + sum(step_distances)/4;
-
+            dstar_path_length_cells = length(path);
+            dstar_path_length_meters = sum(step_distances)/4;
+            trajectory_length = trajectory_length + dstar_path_length_meters;
+            dstar_trajectory_length = dstar_trajectory_length + dstar_path_length_meters;
+            fprintf('D* Lite trajectory length (same floor): %.2f units.\n', dstar_path_length_meters);
+        
             if ~isempty(path)
-                figure(figureHandle); % Bring the existing figure to the foreground
+                figure(figureHandle);
                 hold on;
                 switch startHeight
                     case 0
-                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'g-', 'LineWidth', 2);
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'b-', 'LineWidth', 2);
                     case 100
-                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'g-', 'LineWidth', 2);
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'b-', 'LineWidth', 2);
                     case 200
-                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'g-', 'LineWidth', 2);
-                    otherwise
-                        hold off; % Release the hold
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'b-', 'LineWidth', 2);
                 end
             end
             
-            if goalReached == false
-                disp("Robot is trapped, we coudn't find a reachable path to the target.")
-                goal3DReached = false;
-                return;
-            else
+            if goalReached
                 disp("Target found!")
                 goal3DReached = true;
                 return;
-            end % else
-        end
-        % If the startHeight is different form the goalHeight:
-        if startHeight ~= goalHeight
-            % BUG3 Algorithm here!
+            else
+                disp("Robot is trapped, we coudn't find a reachable path to the target.")
+                goal3DReached = false;
+                return;
+            end
+        
+        % CASE 2: Different Floor Navigation - Multi-floor with emergency stairs
+        else 
+            disp("Random trajectory exploration for emergency stairs");
+
             switch startHeight
                 case 0
-                    bug = emergencyExitExploration_ES(maps.grid.floor2);      % create navigation object
-                    bug.setSignCellsDirection([maps.emergencySigns.floor2.direction(:)]);
-                    bug.setSignCellsLocation([maps.emergencySigns.floor2.location(1,:)', maps.emergencySigns.floor2.location(2,:)',]); 
-                    bug.setExitCells([maps.emergencyStairs.floor2(1,:)', maps.emergencyStairs.floor2(2,:)']); % Stop cells - Emergency stair: Indoor & Outdoor [x',y']
+                    randomExplorer = randomPathEmergencyStairsExploration(maps.grid.floor2, ...
+                        'visionRadius', visionRadius, 'visionAngle', visionAngle, ...
+                        'stepSize', 1);
+                    randomExplorer.setExitCells([maps.emergencyStairs.floor2(1,:)', maps.emergencyStairs.floor2(2,:)']);
                 case 100
-                    bug = emergencyExitExploration_ES(maps.grid.floor3);      % create navigation object
-                    bug.setSignCellsDirection([maps.emergencySigns.floor3.direction(:)]);
-                    bug.setSignCellsLocation([maps.emergencySigns.floor3.location(1,:)', maps.emergencySigns.floor3.location(2,:)',]); 
-                    bug.setExitCells([maps.emergencyStairs.floor3(1,:)', maps.emergencyStairs.floor3(2,:)']); % Stop cells - Emergency stair: Indoor & Outdoor [x',y']
+                    randomExplorer = randomPathEmergencyStairsExploration(maps.grid.floor3, ...
+                        'visionRadius', visionRadius, 'visionAngle', visionAngle, ...
+                        'stepSize', 1);
+                    randomExplorer.setExitCells([maps.emergencyStairs.floor3(1,:)', maps.emergencyStairs.floor3(2,:)']);
                 case 200
-                    bug = emergencyExitExploration_ES(maps.grid.floor4);      % create navigation object
-                    bug.setSignCellsDirection([maps.emergencySigns.floor4.direction(:)]);
-                    bug.setSignCellsLocation([maps.emergencySigns.floor4.location(1,:)', maps.emergencySigns.floor4.location(2,:)',]); 
-                    bug.setExitCells([maps.emergencyStairs.floor4(1,:)', maps.emergencyStairs.floor4(2,:)']); % Stop cells - Emergency stair: Indoor & Outdoor [x',y']
+                    randomExplorer = randomPathEmergencyStairsExploration(maps.grid.floor4, ...
+                        'visionRadius', visionRadius, 'visionAngle', visionAngle, ...
+                        'stepSize', 1);
+                    randomExplorer.setExitCells([maps.emergencyStairs.floor4(1,:)', maps.emergencyStairs.floor4(2,:)']);
             end
             
+            % Create figure for visualization
             fig = figure;
             set(fig, 'Position', [left, bottom, width, height]);
-            [path, goalReached, exitStairsNumber] = bug.query(startPoint, goalPoint, 'animate', true, 'visionRadius', visionRadius, 'visionAngle', visionAngle);  % Run the pathfinding with vision cone
-    %         [path, goalReached, exitStairsNumber] = bug.query(startPoint, goalPoint, 'movie', 'bugEmergencyExitExploration.mp4');
-            total_path = vertcat(total_path, path);
-
-            diff_path = diff(path);
-            % Calculate Euclidean distance for each step
-            step_distances = sqrt(sum(diff_path.^2, 2));
-            % Sum up all distances to get total trajectory length
-            trajectory_length = trajectory_length + sum(step_distances)/4;
             
-            % Plot the path trajectory in green at Fig 1
+            % Run random trajectory exploration
+            [path, goalReached, exitStairsNumber] = randomExplorer.query(startPoint, goalPoint, ...
+                'animate', true, 'maxTime', 300, 'maxSteps', 5000);
+            
+            total_path = vertcat(total_path, path);
+            
             if ~isempty(path)
-                figure(figureHandle); % Bring the existing figure to the foreground
+                % Calculate trajectory length
+                diff_path = diff(path);
+                step_distances = sqrt(sum(diff_path.^2, 2));
+                random_path_length_cells = length(path);
+                random_path_length_meters = sum(step_distances)/4;
+                trajectory_length = trajectory_length + random_path_length_meters;
+                random_trajectory_length = random_trajectory_length + random_path_length_meters;
+                fprintf('Random trajectory length: %.2f units.\n', random_path_length_meters);
+                
+                % Plot path on 3D figure
+                figure(figureHandle);
                 hold on;
                 switch startHeight
                     case 0
-                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'g-', 'LineWidth', 2);
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'b-', 'LineWidth', 2);
                     case 100
-                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'g-', 'LineWidth', 2);
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'b-', 'LineWidth', 2);
                     case 200
-                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'g-', 'LineWidth', 2);
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'b-', 'LineWidth', 2);
                     otherwise
                         hold off; % Release the hold
                 end
             end
-    
+            
             % Important, organize exitStairsNumber such as the emergency exits
             % that go across all floors (in the generateEGMap3DBUG function)
             if exitStairsNumber == 1 || exitStairsNumber == 2 || exitStairsNumber == 3
@@ -210,5 +224,15 @@ function [total_path, trajectory_length, goal3DReached] = eudaldSangenis_BUG3_fc
             end
         end
     end
-end
+    
+    % Calculate total trajectory metrics
+    total_path_length_cells = random_path_length_cells + dstar_path_length_cells;
+    total_path_length_meters = random_path_length_meters + dstar_path_length_meters;
+    
+    % Hold the current figure to allow overlaying additional plots
+    figureHandle = findobj('Type', 'Figure', 'Name', '3D Trajectory MAE UCI');
+    if isempty(figureHandle)
+        error('The figure generated by generateEGMap3DBUG does not exist. Ensure the function has executed correctly.');
+    end
 
+end

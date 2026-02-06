@@ -48,6 +48,8 @@
 %
 % http://www.petercorke.com
 
+% -  Added some visual modifications by Eudald Sangenis
+
 classdef Bug2_ES < Navigation
 
     properties(Access=protected)
@@ -209,8 +211,6 @@ classdef Bug2_ES < Navigation
             visionRadius = 30*4; % 30 meters (4 conversion pxl to meters)
             % Plot the vision cone based on the robot's position, angle, and radius
             theta = linspace(-visionAngle/2, visionAngle/2, 30)  + heading;
-%             x = robot(1) + visionRadius * cos(theta);
-%             y = robot(2) + visionRadius * sin(theta);
             [x, y] = bug.rayCast(robot, theta, visionRadius);
             handle = fill([robot(1), x], [robot(2), y], 'k', 'FaceAlpha', 0.2, 'EdgeColor', 'none'); % Return handle
         end
@@ -263,22 +263,6 @@ classdef Bug2_ES < Navigation
                     disp('Goal reached.');
                     return
                 end
-
-%                 % motion on line toward goal
-%                 d = bug.goal-robot;
-%                 if abs(d(1)) > abs(d(2))
-%                     % line slope less than 45 deg
-%                     dx = sign(d(1));
-%                     L = bug.mline;
-%                     y = -( (robot(1)+dx)*L(1) + L(3) ) / L(2);
-%                     dy = round(y - robot(2));
-%                 else
-%                     % line slope greater than 45 deg
-%                     dy = sign(d(2));
-%                     L = bug.mline;
-%                     x = -( (robot(2)+dy)*L(2) + L(3) ) / L(1);
-%                     dx = round(x - robot(1));
-%                 end
 
                 % Motion on the line toward goal
                 d = bug.goal - robot;    
@@ -349,9 +333,6 @@ classdef Bug2_ES < Navigation
 %                     % Plot the new vision cone
 %                     bug.visionConeHandle = bug.plotVisionCone(n, heading);
                 else
-                    % we are at the end of the list of edge points, we
-                    % are back where we started.  Step 2.c test.
-%                     error('RTB:bug2:noplan', 'robot is trapped')
                     return;
                 end
 

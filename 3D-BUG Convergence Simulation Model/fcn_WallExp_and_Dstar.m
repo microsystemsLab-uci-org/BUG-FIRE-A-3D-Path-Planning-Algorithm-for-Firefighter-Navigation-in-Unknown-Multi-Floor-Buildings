@@ -1,0 +1,481 @@
+function [total_path, trajectory_length, goal3DReached, wall_trajectory_length, dstar_trajectory_length] = fcn_WallExp_and_Dstar(startPoint, goalPoint, visionRadius, visionAngle)
+
+    goal3DReached = false;
+    
+    % Initialize ALL variables that will be used
+    wall_path_length_cells = 0;
+    wall_path_length_meters = 0;
+    dstar_path_length_cells = 0;
+    dstar_path_length_meters = 0;
+    total_path_length_cells = 0;
+    total_path_length_meters = 0;
+
+    wall_trajectory_length = 0;    % Cumulative wall trajectory length
+    dstar_trajectory_length = 0;   % Cumulative D* trajectory length
+    
+    % Get the screen size
+    screenSize = get(0, 'ScreenSize');
+    % Calculate 90% of the screen width and height
+    width = round(screenSize(3) * 0.9);
+    height = round(screenSize(4) * 0.8);
+    
+    % Calculate the left and bottom coordinates to center the figure
+    left = round((screenSize(3) - width) / 2);
+    bottom = round((screenSize(4) - height) / 2);
+    
+    %% Import EG Map
+    % Generate the Engineering Gateway 3D map
+    maps = generateEGMap3DBUG();
+    
+    % Hold the current figure to allow overlaying additional plots
+    figureHandle = findobj('Type', 'Figure', 'Name', '3D Trajectory MAE UCI');
+    if ~isempty(figureHandle)
+        set(figureHandle, 'Position', [left, bottom, width, height]);
+    else
+        % Create figure if it doesn't exist
+        figureHandle = figure('Name', '3D Trajectory MAE UCI');
+        set(figureHandle, 'Position', [left, bottom, width, height]);
+    end
+
+    startHeight = startPoint(3);
+    goalHeight = goalPoint(3);
+    total_path = [];
+    goalReached = false;
+    exitStairsNumber = 0;
+    
+    %% Compute & Display the 3D m-line
+    figure(figureHandle);
+    hold on;
+    
+    mLine3D = homline(startPoint(1), startPoint(2), goalPoint(1), goalPoint(2));
+    mLine3D = mLine3D / norm(mLine3D(1:2));
+    
+    % Get the current axis limits
+    axisLimits = axis;
+    xMin = axisLimits(1); xMax = axisLimits(2);
+    yMin = axisLimits(3); yMax = axisLimits(4);
+    
+    % Plot 3D m-line
+    figure(figureHandle);
+    hold on;
+    
+    % 2D and 3D M-Line representation
+    if startHeight == goalHeight 
+        % If start and goal are on the same floor
+        if mLine3D(2) == 0
+            % If the line is vertical (infinite slope)
+            plot3([startPoint(1) startPoint(1)], [yMin yMax], [startHeight goalHeight], '--', 'Color', '#696969','LineWidth',2);
+        else
+            % For non-vertical lines
+            x = [xMin xMax]';
+            y = -[x [1;1]] * [mLine3D(1); mLine3D(3)] / mLine3D(2);
+            plot3(x, y, [goalHeight; goalHeight], '--', 'Color', '#696969', 'Linewidth',2);
+            axis equal
+        end
+    else
+        % If start and goal are on different floors
+        x_proj = linspace(startPoint(1), goalPoint(1), 100);
+        y_proj = linspace(startPoint(2), goalPoint(2), 100);
+        z_proj = startHeight * ones(size(x_proj));
+    
+        x = [xMin xMax]';
+        y = -[x [1;1]] * [mLine3D(1); mLine3D(3)] / mLine3D(2);
+    
+        % 1. Plot the horizontal projection on the start level
+        plot3(x, y, [startHeight; startHeight], '-.', 'Color', '#A0A0A0', 'Linewidth', 2, 'DisplayName', 'Horizontal Projection');
+    
+        % 2. Plot the 3D m-line from start to goal
+        zLine = linspace(startHeight, goalHeight, 100);
+        plot3(x_proj, y_proj, zLine, '-', 'Color', '#696969', 'linewidth', 2, 'DisplayName', '3D m-line');
+    
+        % 3. Plot the vertical line from (goal_x, goal_y, start_z) to (goal_x, goal_y, goal_z)
+        plot3([goalPoint(1), goalPoint(1)], [goalPoint(2), goalPoint(2)], [startHeight, goalHeight], '-.', 'Color', '#696969', 'LineWidth', 2, 'DisplayName', 'Vertical Line');
+    end
+    
+    % Plot Initial Position on the 3D plot:
+    plot3(startPoint(1), startPoint(2), startHeight, 'ko', 'MarkerSize', 6, 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'g');
+    % Plot the Final Position on the 3D Plot:
+    plot3(goalPoint(1), goalPoint(2), goalHeight, 'p', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'MarkerEdgeColor', 'k');
+
+    %% 3D D* Lite Algorithm Implementation:
+    trajectory_length = 0;
+
+    while true
+        % CASE 1: Same Floor Navigation - Direct to Goal
+        if startHeight == goalHeight
+            switch startHeight
+                case 0
+                    ds = DstarLite_ES(maps.grid.floor2, 'visionRadius', 2, 'visionAngle', visionAngle);
+                case 100
+                    ds = DstarLite_ES(maps.grid.floor3, 'visionRadius', 2, 'visionAngle', visionAngle);
+                case 200
+                    ds = DstarLite_ES(maps.grid.floor4, 'visionRadius', 2, 'visionAngle', visionAngle);
+                otherwise
+                    error('Invalid floor height: %d', startHeight);
+            end
+            
+            pause(1);
+            fig = figure;
+            set(fig, 'Position', [left, bottom, width, height]);
+            
+            % Direct navigation to 3D goal (ignore all emergency features)
+            [path, goalReached] = ds.query(startPoint, goalPoint, 'animate', true);
+            
+            if ~isempty(path)
+                if ~isempty(total_path)
+                    total_path = total_path(:,1:2);
+                end
+                total_path = vertcat(total_path, path);
+                diff_path = diff(path);
+                step_distances = sqrt(sum(diff_path.^2, 2));
+                dstar_path_length_cells = length(path);
+                dstar_path_length_meters = sum(step_distances)/4;
+                trajectory_length = trajectory_length + dstar_path_length_meters;
+                dstar_trajectory_length = dstar_trajectory_length + dstar_path_length_meters;
+                fprintf('D* Lite trajectory length (same floor): %.2f units.\n', dstar_path_length_meters);
+            
+                figure(figureHandle);
+                hold on;
+                switch startHeight
+                    case 0
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'b-', 'LineWidth', 2);
+                    case 100
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'b-', 'LineWidth', 2);
+                    case 200
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'b-', 'LineWidth', 2);
+                end
+            end
+            
+            if goalReached
+                disp("Target found!")
+                goal3DReached = true;
+                return;
+            else
+                disp("Robot is trapped, we couldn't find a reachable path to the target.")
+                goal3DReached = false;
+                return;
+            end
+        
+        % CASE 2: Different Floor Navigation - Multi-floor with emergency stairs
+        else 
+            disp("Wall Following trajectory exploration for emergency stairs");
+
+            switch startHeight
+                case 0
+                    wallExplorer = wallFollowingEmergencyStairsExploration(maps.grid.floor2, ...
+                        'visionRadius', visionRadius, 'visionAngle', visionAngle);
+                    wallExplorer.setExitCells([maps.emergencyStairs.floor2(1,:)', maps.emergencyStairs.floor2(2,:)']);
+                case 100
+                    wallExplorer = wallFollowingEmergencyStairsExploration(maps.grid.floor3, ...
+                        'visionRadius', visionRadius, 'visionAngle', visionAngle);
+                    wallExplorer.setExitCells([maps.emergencyStairs.floor3(1,:)', maps.emergencyStairs.floor3(2,:)']);
+                case 200
+                    wallExplorer = wallFollowingEmergencyStairsExploration(maps.grid.floor4, ...
+                        'visionRadius', visionRadius, 'visionAngle', visionAngle);
+                    wallExplorer.setExitCells([maps.emergencyStairs.floor4(1,:)', maps.emergencyStairs.floor4(2,:)']);
+                otherwise
+                    error('Invalid floor height: %d', startHeight);
+            end
+            
+            % Create figure for visualization
+            fig = figure;
+            set(fig, 'Position', [left, bottom, width, height]);
+            
+            % Run wall trajectory exploration
+            [path, goalReached, exitStairsNumber] = wallExplorer.query(startPoint, goalPoint, ...
+                'animate', true);
+            
+            if ~isempty(path)
+                total_path = vertcat(total_path, path);
+                
+                % Calculate trajectory length
+                diff_path = diff(path);
+                step_distances = sqrt(sum(diff_path.^2, 2));
+                wall_path_length_cells = length(path);
+                wall_path_length_meters = sum(step_distances)/4;
+                trajectory_length = trajectory_length + wall_path_length_meters;
+                wall_trajectory_length = wall_trajectory_length + wall_path_length_meters;
+                fprintf('Wall Following trajectory length: %.2f units.\n', wall_path_length_meters);
+                
+                % Plot path on 3D figure
+                figure(figureHandle);
+                hold on;
+                switch startHeight
+                    case 0
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'b-', 'LineWidth', 2);
+                    case 100
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'b-', 'LineWidth', 2);
+                    case 200
+                        plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'b-', 'LineWidth', 2);
+                end
+            end
+            
+            % Check if we found an emergency exit
+            if exitStairsNumber == 0
+                disp("No emergency stairs found. Cannot proceed to different floor.")
+                goal3DReached = false;
+                return;
+            end
+            
+            % Important, organize exitStairsNumber such as the emergency exits
+            % that go across all floors (in the generateEGMap3DBUG function)
+            if exitStairsNumber == 1 || exitStairsNumber == 2 || exitStairsNumber == 3
+                startHeight = goalHeight;
+            end
+    
+            switch startHeight
+                case 0
+                    if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor2, 2)
+                        startPoint = [maps.emergencyStairs.floor2(:, exitStairsNumber)', startHeight];
+                    else
+                        error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+                    end
+                case 100
+                    if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor3, 2)
+                        startPoint = [maps.emergencyStairs.floor3(:, exitStairsNumber)', startHeight];
+                    else
+                        error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+                    end
+                case 200
+                    if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor4, 2)
+                        startPoint = [maps.emergencyStairs.floor4(:, exitStairsNumber)', startHeight];
+                    else
+                        error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+                    end
+            end
+        end
+    end
+end
+
+
+% function [total_path, trajectory_length, goal3DReached] = wallExploration_and_Dstar_fcn(startPoint, goalPoint, visionRadius, visionAngle)
+% 
+%     goal3DReached = false;
+%     % Get the screen size
+%     screenSize = get(0, 'ScreenSize');
+%     % Calculate 90% of the screen width and height
+%     width = round(screenSize(3) * 0.9);
+%     height = round(screenSize(4) * 0.8);
+%     
+%     % Calculate the left and bottom coordinates to center the figure
+%     left = round((screenSize(3) - width) / 2);
+%     bottom = round((screenSize(4) - height) / 2);
+%     
+%     %% Import EG Map
+%     % Generate the Engineering Gateway 3D map
+%     maps = generateEGMap3DBUG();
+%     
+%     % Hold the current figure to allow overlaying additional plots
+%     figureHandle = findobj('Type', 'Figure', 'Name', '3D Trajectory MAE UCI');
+%     set(figureHandle, 'Position', [left, bottom, width, height]);
+%     if isempty(figureHandle)
+%         error('The figure generated by generateEGMap3DBUG does not exist. Ensure the function has executed correctly.');
+%     end
+% 
+%     startHeight = startPoint(3);
+%     goalHeight = goalPoint(3);
+%     total_path = [];
+%     goalReached = false;
+%     exitStairsNumber = 0;
+%     
+%     %% Compute & Display the 3D m-line
+%     figure(figureHandle);
+%     hold on;
+%     
+%     mLine3D  = homline(startPoint (1), startPoint (2), goalPoint(1), goalPoint(2)); % Calculate the homogeneous line representation of the m-line
+%     mLine3D  = mLine3D  / norm(mLine3D (1:2)); % Normalize the line
+%     
+%     % Get the current axis limits
+%     axisLimits = axis;
+%     xMin = axisLimits(1); xMax = axisLimits(2);
+%     yMin = axisLimits(3); yMax = axisLimits(4);
+%     
+%     % Plot 3D m-line
+%     figure(figureHandle); % Bring the existing figure to the foreground
+%     hold on;
+%     
+%     % 2D and 3D M-Line representation
+%     if startHeight == goalHeight 
+%         % If start and goal are on the same floor
+%         if mLine3D (2) == 0
+%             % If the line is vertical (infinite slope)
+%             plot3([startPoint(1) startPoint(1)], [yMin yMax], [startHeight goalHeight], '--', 'Color', '#696969','LineWidth',2);
+%         else
+%             % For non-vertical lines
+%             x = [xMin xMax]';
+%             y = -[x [1;1]] * [mLine3D(1); mLine3D(3)] / mLine3D(2);
+%             plot3(x, y, [goalHeight; goalHeight], '--', 'Color', '#696969', 'Linewidth',2);
+%             axis equal
+%         end
+%     else
+%         % If start and goal are on different floors
+%         x_proj = linspace(startPoint(1), goalPoint(1), 100);
+%         y_proj = linspace(startPoint(2), goalPoint(2), 100);
+%         z_proj = startHeight * ones(size(x_proj));
+%     
+%         x = [xMin xMax]';
+%         y = -[x [1;1]] * [mLine3D(1); mLine3D(3)] / mLine3D(2);
+%     
+%         % 1. Plot the horizontal projection on the start level
+%         plot3(x, y, [startHeight; startHeight], '-.', 'Color', '#A0A0A0', 'Linewidth', 2, 'DisplayName', 'Horizontal Projection');
+%     
+%         % 2. Plot the 3D m-line from start to goal
+%         zLine = linspace(startHeight, goalHeight, 100);
+%         plot3(x_proj, y_proj, zLine, '-', 'Color', '#696969', 'Linewidth', 2, 'DisplayName', '3D m-line');
+%     
+%         % 3. Plot the vertical line from (goal_x, goal_y, start_z) to (goal_x, goal_y, goal_z)
+%         plot3([goalPoint(1), goalPoint(1)], [goalPoint(2), goalPoint(2)], [startHeight, goalHeight], '-.', 'Color', '#696969', 'Linewidth', 2, 'DisplayName', 'Vertical Line');
+%     end
+%     
+%     % Plot Initial Position on the 3D plot:
+%     plot3(startPoint (1), startPoint (2), startHeight, 'ko', 'MarkerSize', 6, 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'g');
+%     % Plot the Final Position on the 3D Plot:
+%     plot3(goalPoint(1), goalPoint(2), goalHeight, 'p', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'MarkerEdgeColor', 'k');
+% 
+%     %% 3D D* Lite Algorithm Implementation:
+%     trajectory_length = 0;
+% 
+%     while true
+%         % CASE 1: Same Floor Navigation - Direct to Goal
+%         if startHeight == goalHeight
+%             switch startHeight
+%                 case 0
+%                     ds = DstarLite_ES(maps.grid.floor2, 'visionRadius', 2, 'visionAngle', visionAngle);
+%                 case 100
+%                     ds = DstarLite_ES(maps.grid.floor3, 'visionRadius', 2, 'visionAngle', visionAngle);
+%                 case 200
+%                     ds = DstarLite_ES(maps.grid.floor4, 'visionRadius', 2, 'visionAngle', visionAngle);
+%             end
+%             
+%             pause(1);
+%             fig = figure;
+%             set(fig, 'Position', [left, bottom, width, height]);
+%             
+%             % Direct navigation to 3D goal (ignore all emergency features)
+%             [path, goalReached] = ds.query(startPoint, goalPoint, 'animate', true);
+%             
+%             total_path = vertcat(total_path, path);
+%             diff_path = diff(path);
+%             step_distances = sqrt(sum(diff_path.^2, 2));
+%             dstar_path_length_cells = length(path);
+%             dstar_path_length_meters = sum(step_distances)/4;
+%             trajectory_length = trajectory_length + dstar_path_length_meters;
+%             fprintf('D* Lite trajectory length (same floor): %.2f units.\n', dstar_path_length_meters);
+%         
+%             if ~isempty(path)
+%                 figure(figureHandle);
+%                 hold on;
+%                 switch startHeight
+%                     case 0
+%                         plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'b-', 'LineWidth', 2);
+%                     case 100
+%                         plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'b-', 'LineWidth', 2);
+%                     case 200
+%                         plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'b-', 'LineWidth', 2);
+%                 end
+%             end
+%             
+%             if goalReached
+%                 disp("Target found!")
+%                 goal3DReached = true;
+%                 return;
+%             else
+%                 disp("Robot is trapped, we coudn't find a reachable path to the target.")
+%                 goal3DReached = false;
+%                 return;
+%             end
+%         
+%         % CASE 2: Different Floor Navigation - Multi-floor with emergency stairs
+%         else 
+%             disp("Wall Following trajectory exploration for emergency stairs");
+% 
+%             switch startHeight
+%                 case 0
+%                     wallExplorer = wallFollowingEmergencyStairsExploration(maps.grid.floor2, ...
+%                         'visionRadius', visionRadius, 'visionAngle', visionAngle);
+%                     wallExplorer.setExitCells([maps.emergencyStairs.floor2(1,:)', maps.emergencyStairs.floor2(2,:)']);
+%                 case 100
+%                     wallExplorer = wallFollowingEmergencyStairsExploration(maps.grid.floor3, ...
+%                         'visionRadius', visionRadius, 'visionAngle', visionAngle);
+%                     wallExplorer.setExitCells([maps.emergencyStairs.floor3(1,:)', maps.emergencyStairs.floor3(2,:)']);
+%                 case 200
+%                     wallExplorer = wallFollowingEmergencyStairsExploration(maps.grid.floor4, ...
+%                         'visionRadius', visionRadius, 'visionAngle', visionAngle);
+%                     wallExplorer.setExitCells([maps.emergencyStairs.floor4(1,:)', maps.emergencyStairs.floor4(2,:)']);
+%             end
+%             
+%             % Create figure for visualization
+%             fig = figure;
+%             set(fig, 'Position', [left, bottom, width, height]);
+%             
+%             % Run wall trajectory exploration
+%             [path, goalReached, exitStairsNumber] = wallExplorer.query(startPoint, goalPoint, ...
+%                 'animate', true);
+%             
+%             total_path = vertcat(total_path, path);
+%             
+%             if ~isempty(path)
+%                 % Calculate trajectory length
+%                 diff_path = diff(path);
+%                 step_distances = sqrt(sum(diff_path.^2, 2));
+%                 wall_path_length_cells = length(path);
+%                 wall_path_length_meters = sum(step_distances)/4;
+%                 trajectory_length = trajectory_length + wall_path_length_meters;
+%                 fprintf('Wall Following trajectory length: %.2f units.\n', wall_path_length_meters);
+%                 
+%                 % Plot path on 3D figure
+%                 figure(figureHandle);
+%                 hold on;
+%                 switch startHeight
+%                     case 0
+%                         plot3(path(:,1), path(:,2), ones(size(path,1), 1)*0, 'b-', 'LineWidth', 2);
+%                     case 100
+%                         plot3(path(:,1), path(:,2), ones(size(path,1), 1)*100, 'b-', 'LineWidth', 2);
+%                     case 200
+%                         plot3(path(:,1), path(:,2), ones(size(path,1), 1)*200, 'b-', 'LineWidth', 2);
+%                     otherwise
+%                         hold off; % Release the hold
+%                 end
+%             end
+%             
+%             % Important, organize exitStairsNumber such as the emergency exits
+%             % that go across all floors (in the generateEGMap3DBUG function)
+%             if exitStairsNumber == 1 || exitStairsNumber == 2 || exitStairsNumber == 3
+%                 startHeight = goalHeight;
+%             end
+%     
+%             switch startHeight
+%                 case 0
+%                     if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor2, 2)
+%                         startPoint = [maps.emergencyStairs.floor2(:, exitStairsNumber)', startHeight];
+%                     else
+%                         error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+%                     end
+%                 case 100
+%                     if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor3, 2)
+%                         startPoint = [maps.emergencyStairs.floor3(:, exitStairsNumber)', startHeight];
+%                     else
+%                         error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+%                     end
+%                 case 200
+%                     if exitStairsNumber > 0 && exitStairsNumber <= size(maps.emergencyStairs.floor4, 2)
+%                         startPoint = [maps.emergencyStairs.floor4(:, exitStairsNumber)', startHeight];
+%                     else
+%                         error("Invalid exitStairsNumber: %d. Ensure emergency stairs logic is correct.", exitStairsNumber);
+%                     end
+%             end
+%         end
+%     end
+%     
+%     % Calculate total trajectory metrics
+%     total_path_length_cells = wall_path_length_cells + dstar_path_length_cells;
+%     total_path_length_meters = wall_path_length_meters + dstar_path_length_meters;
+%     
+%     % Hold the current figure to allow overlaying additional plots
+%     figureHandle = findobj('Type', 'Figure', 'Name', '3D Trajectory MAE UCI');
+%     if isempty(figureHandle)
+%         error('The figure generated by generateEGMap3DBUG does not exist. Ensure the function has executed correctly.');
+%     end
+% 
+% end
+% 
