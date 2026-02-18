@@ -45,20 +45,21 @@ It also contains synthetic augmentations (occlusions, lighting variations, blur,
 If you use this work, please cite the following paper:
 > **BUG-FIRE: A 3D Path Planning Algorithm with Augmented Reality Integration for Firefighter Navigation in Unknown Multi-Floor Buildings**<br>
 > E. Sangenis, and A. M. Shkel<br>
-> *Fire Technology*, accepted, doi:0.1007/s10694-026-01872-9, 2026.
+> *Fire Technology* (Springer Nature), vol.62, no.42, 2026.
+> doi: 10.1007/s10694-026-01872-9
 
 **BibTeX:**
 
 ```bibtex
 @ARTICLE{bugFireSangenis,
-  author={Sangenis, Eudald and Andrei M. Shkel},
-  journal={Fire Technology}, 
-  title={BUG-FIRE: A 3D Path Planning Algorithm with Augmented Reality Integration for Firefighter Navigation in Unknown Multi-Floor Buildings}, 
-  year={2026},
-  volume={xx},
-  number={x},
-  pages={xx-xx},
-  doi={10.1007/s10694-026-01872-9}
+  author = {Sangenis, Eudald and Andrei M. Shkel},
+  journal = {Fire Technology},
+  publisher = {Springer Nature},
+  title = {BUG-FIRE: A 3D Path Planning Algorithm with Augmented Reality Integration for Firefighter Navigation in Unknown Multi-Floor Buildings}, 
+  year = {2026},
+  volume = {62},
+  number = {41},
+  url = {https://doi.org/10.1007/s10694-026-01872-9}
 }
 ```
 
